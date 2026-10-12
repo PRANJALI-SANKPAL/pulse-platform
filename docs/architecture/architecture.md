@@ -506,6 +506,80 @@ Next design activities:
 
 The architecture will be updated as these decisions are finalized.
 
+
+
+## Idempotency and Duplicate Execution Protection
+
+PostgreSQL remains the authoritative source of execution state.
+
+Before processing an execution, the worker attempts an atomic
+state transition from QUEUED to RUNNING. The transition succeeds
+only if the execution is still QUEUED.
+
+If another worker invocation attempts to claim the same execution,
+the database update affects zero rows and that invocation is skipped.
+
+This provides protection against duplicate processing attempts
+for the same execution record.
+
+Current limitations:
+- The in-memory queue is not durable.
+- A worker crash after claiming an execution can leave it RUNNING.
+- Automatic recovery, retries, and dead-letter handling are not
+  implemented yet.
+- Redis and Kafka are not configured in the current local setup.
+
+## Retry and Failure Handling
+
+The worker claims queued executions using an atomic PostgreSQL
+state transition to prevent duplicate claims.
+
+When a task fails, the worker records the error and retry count.
+Retryable failures enter RETRYING before the worker attempts
+the task again with an increasing delay.
+
+After the retry limit is reached, the execution is marked FAILED.
+
+Current limitations:
+- Retry processing is in-process and not durable across restarts.
+- The worker thread remains occupied during backoff.
+- Failure classification is not yet implemented.
+- Stuck RUNNING executions do not yet have automatic recovery.
+- A durable dead-letter queue requires a durable messaging layer.
+
+## Observability
+
+Pulse uses Spring Boot Actuator for application health and
+metric inspection.
+
+The worker logs execution start, completion, retry, skipped
+claim, and terminal failure events. Execution IDs are included
+to help correlate logs with persisted execution records.
+
+Initial custom metrics include:
+- pulse.execution.started
+- pulse.execution.finished
+- pulse.execution.retries
+- pulse.execution.claims
+- pulse.execution.errors
+
+Current limitations:
+- Custom metrics are held in application memory.
+- Metrics are not yet exported to a monitoring platform.
+- Distributed tracing and alerting are not configured.
+- Detailed health information is for local development only.
+
+## API Error Handling
+
+A global exception handler provides consistent JSON error responses.
+
+- Missing workflows and executions return HTTP 404.
+- Request validation and malformed request bodies return HTTP 400.
+- Unexpected server errors return HTTP 500 with a generic client-facing message.
+- Unexpected errors are logged internally for debugging.
+- Error responses include a timestamp, HTTP status, message, and request path.
+
+
 ---
 
 ## 16. Related Documentation
@@ -513,3 +587,5 @@ The architecture will be updated as these decisions are finalized.
 * `docs/requirements/requirements.md`
 * `docs/architecture/capacity-estimation.md`
 * `README.md`
+
+

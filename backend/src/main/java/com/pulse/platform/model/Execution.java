@@ -83,11 +83,13 @@ public class Execution {
     public void markRunning() {
         this.status = ExecutionStatus.RUNNING;
         this.startedAt = Instant.now();
+        this.completedAt = null;
     }
 
     public void markCompleted() {
         this.status = ExecutionStatus.COMPLETED;
         this.completedAt = Instant.now();
+        this.errorMessage = null;
     }
 
     public void markFailed(String errorMessage) {
@@ -96,7 +98,10 @@ public class Execution {
         this.completedAt = Instant.now();
     }
 
-    public void incrementRetryCount() {
+    public void markRetrying(String errorMessage) {
+        this.status = ExecutionStatus.RETRYING;
+        this.errorMessage = errorMessage;
         this.retryCount++;
     }
+
 }

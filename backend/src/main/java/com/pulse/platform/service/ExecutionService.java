@@ -6,6 +6,7 @@ import com.pulse.platform.model.Workflow;
 import com.pulse.platform.repository.ExecutionRepository;
 import com.pulse.platform.repository.WorkflowRepository;
 import org.springframework.stereotype.Service;
+import com.pulse.platform.exception.ResourceNotFoundException;
 
 import java.util.UUID;
 
@@ -14,46 +15,45 @@ public class ExecutionService {
 
     private final ExecutionRepository executionRepository;
     private final WorkflowRepository workflowRepository;
+    private final ExecutionQueueService executionQueueService;
 
     public ExecutionService(
             ExecutionRepository executionRepository,
-            WorkflowRepository workflowRepository) {
-
+            WorkflowRepository workflowRepository,
+            ExecutionQueueService executionQueueService) {
         this.executionRepository = executionRepository;
         this.workflowRepository = workflowRepository;
+        this.executionQueueService = executionQueueService;
     }
 
     public ExecutionResponse createExecution(UUID workflowId) {
-
         Workflow workflow = workflowRepository.findById(workflowId)
                 .orElseThrow(() ->
-                        new RuntimeException(
+                        new ResourceNotFoundException(
                                 "Workflow not found: " + workflowId
                         )
                 );
 
         Execution execution = new Execution(workflow);
-
-        /*
-         * For now we immediately move the execution
-         * to QUEUED.
-         *
-         * Kafka will actually handle asynchronous
-         * processing from Day 7.
-         */
         execution.markQueued();
 
-        Execution savedExecution =
-                executionRepository.save(execution);
+        Execution savedExecution = executionRepository.save(execution);
+
+        try {
+            executionQueueService.submit(savedExecution.getId());
+        } catch (IllegalStateException exception) {
+            savedExecution.markFailed(exception.getMessage());
+            executionRepository.save(savedExecution);
+            throw exception;
+        }
 
         return toResponse(savedExecution);
     }
 
     public ExecutionResponse getExecution(UUID executionId) {
-
         Execution execution = executionRepository.findById(executionId)
                 .orElseThrow(() ->
-                        new RuntimeException(
+                        new ResourceNotFoundException(
                                 "Execution not found: " + executionId
                         )
                 );
@@ -62,7 +62,6 @@ public class ExecutionService {
     }
 
     private ExecutionResponse toResponse(Execution execution) {
-
         return new ExecutionResponse(
                 execution.getId(),
                 execution.getWorkflow().getId(),
